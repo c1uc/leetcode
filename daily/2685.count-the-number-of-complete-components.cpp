@@ -8,11 +8,15 @@
 #include <bits/stdc++.h>
 using namespace std;
 
+vector<int> fa(50), sz(50, 1), edges_cnt(50, 0), vis(50, 0);
+
 class Solution {
 public:
     int countCompleteComponents(int n, vector<vector<int>>& edges) {
-        vector<int> fa(n), sz(n, 1), edges_cnt(n, 0), vis(n, 0);
         iota(fa.begin(), fa.end(), 0);
+        fill(sz.begin(), sz.end(), 1);
+        fill(edges_cnt.begin(), edges_cnt.end(), 0);
+        fill(vis.begin(), vis.end(), 0);
 
         auto find = [&](int x, auto &&self) -> int {
             return fa[x] == x ? x : fa[x] = self(fa[x], self);
@@ -21,6 +25,7 @@ public:
         for(auto &e: edges) {
             int x = find(e[0], find);
             int y = find(e[1], find);
+            if(sz[x] > sz[y]) swap(x, y);
             if(x != y) {
                 fa[x] = y;
                 sz[y] += sz[x];
