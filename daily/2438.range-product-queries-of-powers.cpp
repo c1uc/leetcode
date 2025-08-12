@@ -23,15 +23,16 @@ class Solution {
             vector<int> prefix, powers;
             while(n) {
                 int low_bit = n & -n;
-                prefix.emplace_back(low_bit * (prefix.empty() ? 1 : prefix.back()) % MOD);
+                prefix.emplace_back(1ll * low_bit * (prefix.empty() ? 1 : prefix.back()) % MOD);
                 powers.emplace_back(low_bit);
                 n ^= low_bit;
             }
             vector<int> inv(prefix.size());
             inv.back() = qpow(prefix.back(), MOD - 2);
             for (int i = prefix.size() - 2; i >= 0; i--) {
-                inv[i] = 1ll * inv[i + 1] * powers[i] % MOD;
+                inv[i] = 1ll * inv[i + 1] * powers[i + 1] % MOD;
             }
+
             vector<int> ans;
             for (auto& q : queries) {
                 ans.emplace_back(1ll * prefix[q[1]] * (q[0] == 0 ? 1 : inv[q[0] - 1]) % MOD);
