@@ -13,7 +13,7 @@ class Solution {
             });
             int ans = 0;
             for(int i = 0; i < points.size(); i++) {
-                int prev_y = 51;
+                int prev_y = 1e9 + 1;
                 for(int j = i - 1; j >= 0; j--) {
                     if(points[j][0] <= points[i][0] && points[j][1] >= points[i][1] && points[j][1] < prev_y) {
                         prev_y = points[j][1];
