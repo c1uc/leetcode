@@ -7,7 +7,7 @@ class Solution {
     public:
         bool hasIncreasingSubarrays(vector<int>& nums, int k) {
             if(k == 1) return nums.size() > 1;
-            int len = 0, prev_len = 1;
+            int len = 1, prev_len = 0;
             for(auto x: nums | views::pairwise_transform([](auto a, auto b) {
                 return b > a;
             })) {
