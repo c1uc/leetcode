@@ -1,10 +1,3 @@
-/*
- * @lc app=leetcode id=3350 lang=cpp
- *
- * [3350] Adjacent Increasing Subarrays Detection II
- */
-
-// @lc code=start
 #include <bits/stdc++.h>
 using namespace std;
 
@@ -17,13 +10,12 @@ public:
             if(nums[i] > nums[i - 1]) {
                 len++;
             } else {
+                ans = max(ans, max(len >> 1, min(prev_len, len)));
                 prev_len = len;
                 len = 1;
             }
-            ans = max(ans, max(len >> 1, min(prev_len, len)));
         }
+        ans = max(ans, max(len >> 1, min(prev_len, len)));
         return ans;
     }
 };
-// @lc code=end
-
