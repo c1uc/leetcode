@@ -6,7 +6,7 @@ class Solution {
     public:
         int maxFrequency(vector<int>& nums, int k, int numOperations) {
             int mx = *max_element(nums.begin(), nums.end());
-            map<long long, int> count, df;
+            map<int, int> count, df;
             for(auto x: nums) {
                 count[x]++;
                 df[x]++;
