@@ -5,17 +5,19 @@ using namespace std;
 class Solution {
     public:
         int countTrapezoids(vector<vector<int>>& points) {
-            unordered_map<double, map<int, int>> slope_intercept_count;
-            unordered_map<int, map<int, int>> mid_slope_count;
+            unordered_map<double, map<double, int>> slope_intercept_count;
+            unordered_map<int, map<double, int>> mid_slope_count;
             for(int i = 0; i < points.size(); i++) {
                 int x1 = points[i][0], y1 = points[i][1];
                 for(int j = i + 1; j < points.size(); j++) {
                     int x2 = points[j][0], y2 = points[j][1];
                     int dx = x2 - x1, dy = y2 - y1;
+
                     double slope = dx == 0 ? DBL_MAX : (double)dy / dx;
-                    double intercept = dx == 0 ? x1 : y1 - slope * x1;
+                    double intercept = dx == 0 ? x1 : 1.0 * (y1 * dx - x1 * dy) / dx;
                     slope_intercept_count[slope][intercept]++;
-                    int mid = (x1 + x2 + 2000) << 12 | (y1 + y2 + 2000);
+
+                    int mid = (x1 + x2 + 2000) << 16 | (y1 + y2 + 2000);
                     mid_slope_count[mid][slope]++;
                 }
             }
