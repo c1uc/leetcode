@@ -35,10 +35,7 @@ class Solution {
                 in_use.push({end, room});
                 cnt[room]++;
             }
-            for(auto& c : cnt) {
-                cout << c << " ";
-            }
-            cout << endl;
+
             return max_element(cnt.begin(), cnt.end()) - cnt.begin();
         }
     };
