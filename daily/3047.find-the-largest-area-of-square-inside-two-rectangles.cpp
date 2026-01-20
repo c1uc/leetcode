@@ -1,10 +1,3 @@
-/*
- * @lc app=leetcode id=3047 lang=cpp
- *
- * [3047] Find the Largest Area of Square Inside Two Rectangles
- */
-
-// @lc code=start
 #include <bits/stdc++.h>
 using namespace std;
 
@@ -36,5 +29,3 @@ public:
         return ans;
     }
 };
-// @lc code=end
-
