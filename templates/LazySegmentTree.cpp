@@ -2,15 +2,15 @@
 Lazy Segment Tree (LST) Template
 
 Features:
-- Generic lazy segment tree with range updates and range queries.
-- Supports custom combine (op), apply (apply), and lazy composition (compose) functions.
-- Defaults implement range add + range sum for arithmetic types.
+- Generic lazy segment tree with range updates (delta or assign) and range queries.
+- Customizable combine (op), apply (apply), and lazy composition (compose) functions.
+- Defaults implement range add (delta) + range sum for arithmetic types.
 - Array is zero-indexed.
 
-Usage (range add + range sum):
+Usage (range add + range sum, delta style):
     vector<long long> a = {1, 2, 3, 4, 5};
-    LazySegmentTree<long long, long long> st(a);
-    st.update(1, 4, 2); // add 2 to a[1..3]
+    LazySegmentTree<long long, long long> st(a); // tag is delta
+    st.update(1, 4, 2); // add +2 to a[1..3]
     long long s = st.query(0, 5); // sum of a[0..4]
 
 Custom behavior example (range assign + range min):
@@ -20,12 +20,12 @@ Custom behavior example (range assign + range min):
     auto apply = [](const T& cur, const L& tag, int len){
         return tag ? *tag : cur;
     };
-    auto compose = [](const L& a, const L& b){ return b ? b : a; };
+    auto compose = [](const L& a, const L& b){ return b ? b : a; }; // newer overrides
     LazySegmentTree<T, L> st(a, op, (long long)4e18, apply, compose, nullopt);
 
 Template Parameters:
 - T: Node value type.
-- L: Lazy tag type.
+- L: Lazy tag type (delta, assign value, etc.).
 - op: Associative binary function: T (T, T).
 - apply: Function to apply lazy tag to a node value over segment length.
 - compose: Function to combine two lazy tags (existing, incoming) => merged tag.
@@ -42,8 +42,8 @@ class LazySegmentTree {
     vector<T> tree;
     vector<L> lazy;
     function<T(const T&, const T&)> op;
-    function<T(const T&, const L&, int)> apply; // apply tag to node value
-    function<L(const L&, const L&)> compose;   // merge existing and new tag
+    function<T(const T&, const L&, int)> apply; // apply lazy delta/tag to node value
+    function<L(const L&, const L&)> compose;   // merge existing (first) and new (second) tag
     T e;   // identity for op
     L id;  // identity for lazy (no-op)
 
@@ -59,6 +59,7 @@ class LazySegmentTree {
     }
 
     void apply_to_node(int u, int l, int r, const L& tag) {
+        if (tag == id) return;
         tree[u] = apply(tree[u], tag, r - l);
         lazy[u] = compose(lazy[u], tag);
     }
@@ -97,8 +98,14 @@ public:
         const vector<T> &a,
         function<T(const T&, const T&)> op = [](const T& a, const T& b){ return a + b; },
         T e = T{0},
-        function<T(const T&, const L&, int)> apply = [](const T& cur, const L& tag, int len){ return cur + static_cast<T>(tag) * len; },
-        function<L(const L&, const L&)> compose = [](const L& a, const L& b){ return a + b; },
+        function<T(const T&, const L&, int)> apply = [](const T& cur, const L& tag, int len){
+            // delta update: add tag * length to the segment aggregate
+            return cur + static_cast<T>(tag) * len;
+        },
+        function<L(const L&, const L&)> compose = [](const L& a, const L& b){
+            // existing then incoming for delta accumulation
+            return a + b;
+        },
         L id = L{0}
     ) : n(a.size()), op(op), apply(apply), compose(compose), e(e), id(id) {
         tree.assign(4 * max(1, n), e);
@@ -106,9 +113,14 @@ public:
         if (n > 0) build(a, 0, 0, n);
     }
 
-    // Range update: apply tag to [l, r)
+    // Range update: apply tag (delta by default) to [l, r)
     void update(int l, int r, const L& tag) {
         range_update(0, 0, n, l, r, tag);
+    }
+
+    // Convenience alias for delta-style updates
+    void add(int l, int r, const L& delta) {
+        update(l, r, delta);
     }
 
     // Range query: op(a[l], a[l+1], ..., a[r-1])
