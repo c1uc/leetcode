@@ -77,7 +77,8 @@ def main():
     api_key = os.environ["SHEET_API_KEY"]
     gid = int(os.environ.get("GID", "0"))
     col_letter = os.environ.get("SUBMISSION_LINK_COLUMN", "A")
-    leetcode_session = os.environ["LEETCODE_SESSION"]
+    session_file = os.environ["LEETCODE_SESSION_FILE"]
+    leetcode_session = Path(session_file).read_text().strip()
     outdir = os.environ.get("OUTDIR", ".")
 
     sheet_name = get_sheet_name(sheet_id, gid, api_key)
