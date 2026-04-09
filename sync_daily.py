@@ -121,17 +121,20 @@ def parse_sheet_date(s: str) -> datetime.date:
     return datetime.date(int(y), int(m), int(d))
 
 
-def main():
-    load_dotenv()
+def run(
+    sheet_id: str,
+    creds_file: str,
+    gid: int = 0,
+    date_col: str = "A",
+    problem_col: str = "B",
+    difficulty_col: str = "C",
+    tags_col: str = "D",
+) -> tuple[int, list[dict]]:
+    """Run the daily sync and return (count_added, problems_added).
 
-    sheet_id = os.environ["SHEET_ID"]
-    gid = int(os.environ.get("GID", "0"))
-    date_col = os.environ.get("DAILY_DATE_COLUMN", "A")
-    problem_col = os.environ.get("DAILY_PROBLEM_COLUMN", "B")
-    difficulty_col = os.environ.get("DAILY_DIFFICULTY_COLUMN", "C")
-    tags_col = os.environ.get("DAILY_TAGS_COLUMN", "D")
-    creds_file = os.environ["GOOGLE_SERVICE_ACCOUNT_FILE"]
-
+    Each item in problems_added is a dict with keys: date, id, title, slug, difficulty, tags.
+    Raises on failure instead of calling sys.exit.
+    """
     sheets = get_sheets(creds_file)
     sheet_name = get_sheet_name(sheets, sheet_id, gid)
 
@@ -139,8 +142,7 @@ def main():
     last_row = max((i + 1 for i, v in enumerate(date_values) if v), default=0)
 
     if last_row == 0:
-        print("No existing date entries found in the sheet.", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError("No existing date entries found in the sheet.")
 
     last_date = parse_sheet_date(date_values[last_row - 1])
     today = datetime.datetime.now(datetime.timezone.utc).date()
@@ -153,7 +155,7 @@ def main():
 
     if not missing:
         print("Sheet is already up to date.")
-        return
+        return 0, []
 
     print(f"Adding {len(missing)} missing entries (up to {format_date(today)})...")
 
@@ -173,6 +175,7 @@ def main():
     tags_col_index = col_letter_to_index(tags_col)
     first_new_row = last_row + 1
     next_row = first_new_row
+    problems_added = []
 
     for d in missing:
         problem = get_problem(d)
@@ -213,11 +216,19 @@ def main():
             }
         })
         print(f"  [{format_date(d)}] {problem['difficulty']:6s}  {title_text}")
+        problems_added.append({
+            "date": format_date(d),
+            "id": problem["id"],
+            "title": problem["title"],
+            "slug": problem["slug"],
+            "difficulty": problem["difficulty"],
+            "tags": problem["tags"],
+        })
         next_row += 1
 
     if not value_ranges:
         print("Nothing to write.")
-        return
+        return 0, []
 
     last_new_row = next_row - 1  # inclusive, 1-based
 
@@ -292,7 +303,25 @@ def main():
             else:
                 raise
 
-    print(f"Done. Added {len(missing)} entries.")
+    print(f"Done. Added {len(problems_added)} entries.")
+    return len(problems_added), problems_added
+
+
+def main():
+    load_dotenv()
+    try:
+        count, _ = run(
+            sheet_id=os.environ["SHEET_ID"],
+            creds_file=os.environ["GOOGLE_SERVICE_ACCOUNT_FILE"],
+            gid=int(os.environ.get("GID", "0")),
+            date_col=os.environ.get("DAILY_DATE_COLUMN", "A"),
+            problem_col=os.environ.get("DAILY_PROBLEM_COLUMN", "B"),
+            difficulty_col=os.environ.get("DAILY_DIFFICULTY_COLUMN", "C"),
+            tags_col=os.environ.get("DAILY_TAGS_COLUMN", "D"),
+        )
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

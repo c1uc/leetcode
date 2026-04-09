@@ -13,6 +13,10 @@ SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
 STATE_FILE = Path(__file__).parent / ".seen_urls"
 
 
+class SessionExpiredError(Exception):
+    """Raised when the LeetCode session cookie is invalid or expired."""
+
+
 def col_index_to_letter(index: int) -> str:
     """Convert 0-based column index to A1 column letter(s)."""
     result = ""
@@ -64,23 +68,23 @@ def make_leetcode_session(leetcode_session_cookie: str) -> requests.Session:
     sess.get(GRAPHQL_URL)
     csrf = sess.cookies.get("csrftoken", domain="leetcode.com")
     if not csrf:
-        print("Failed to obtain csrftoken from LeetCode.", file=sys.stderr)
-        sys.exit(1)
+        raise SessionExpiredError("Failed to obtain csrftoken from LeetCode. Session may be expired.")
     sess.headers["x-csrftoken"] = csrf
     return sess
 
 
-def main():
-    load_dotenv()
+def run(
+    sheet_id: str,
+    api_key: str,
+    session_cookie: str,
+    outdir: str = ".",
+    gid: int = 0,
+    col_letter: str = "A",
+) -> tuple[list[str], int]:
+    """Run the submission sync and return (downloaded_files, failed_count).
 
-    sheet_id = os.environ["SHEET_ID"]
-    api_key = os.environ["SHEET_API_KEY"]
-    gid = int(os.environ.get("GID", "0"))
-    col_letter = os.environ.get("SUBMISSION_LINK_COLUMN", "A")
-    session_file = os.environ["LEETCODE_SESSION_FILE"]
-    leetcode_session = Path(session_file).read_text().strip()
-    outdir = os.environ.get("OUTDIR", ".")
-
+    Raises SessionExpiredError if the LeetCode session is invalid.
+    """
     sheet_name = get_sheet_name(sheet_id, gid, api_key)
     all_urls = fetch_column_values(sheet_id, sheet_name, col_letter, api_key)
 
@@ -89,12 +93,13 @@ def main():
 
     if not new_urls:
         print("No new submissions.")
-        return
+        return [], 0
 
     print(f"Found {len(new_urls)} new submission(s).")
 
-    sess = make_leetcode_session(leetcode_session)
+    sess = make_leetcode_session(session_cookie)
     failed = 0
+    downloaded = []
 
     for url in new_urls:
         try:
@@ -107,6 +112,12 @@ def main():
 
         try:
             detail = fetch_submission(sess, sid)
+        except RuntimeError as e:
+            if "LEETCODE_SESSION" in str(e) or "No submission details" in str(e):
+                raise SessionExpiredError(str(e)) from e
+            print(f"[FAIL] {url}: {e}", file=sys.stderr)
+            failed += 1
+            continue
         except Exception as e:
             print(f"[FAIL] {url}: {e}", file=sys.stderr)
             failed += 1
@@ -126,10 +137,32 @@ def main():
 
         print(f"[OK] {filepath}  ({lang})")
         seen.add(url)
+        downloaded.append(filepath)
 
     save_seen(seen)
+    return downloaded, failed
 
-    if failed:
+
+def main():
+    load_dotenv()
+    try:
+        session_file = os.environ["LEETCODE_SESSION_FILE"]
+        session_cookie = Path(session_file).read_text().strip()
+        downloaded, failed = run(
+            sheet_id=os.environ["SHEET_ID"],
+            api_key=os.environ["SHEET_API_KEY"],
+            session_cookie=session_cookie,
+            outdir=os.environ.get("OUTDIR", "."),
+            gid=int(os.environ.get("GID", "0")),
+            col_letter=os.environ.get("SUBMISSION_LINK_COLUMN", "A"),
+        )
+        if failed:
+            sys.exit(1)
+    except SessionExpiredError as e:
+        print(f"Session expired: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

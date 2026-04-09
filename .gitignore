@@ -36,3 +36,5 @@
 credential.json
 session.txt
 .seen_urls
+
+__pycache__/*
