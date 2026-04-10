@@ -1,0 +1,25 @@
+services:
+  bot:
+    image: ghcr.io/c1uc/leetcode-bot:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./credential.json:/app/credential.json:ro
+      - ./session.txt:/app/session.txt
+      - ./daily:/app/daily
+      - ./.git:/app/.git
+      - ./.seen_urls:/app/.seen_urls
+      - ./.last_sync.json:/app/.last_sync.json
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_LABEL_ENABLE=true
+    command: --label-enable

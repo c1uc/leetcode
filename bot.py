@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -320,6 +321,21 @@ class SessionModal(ui.Modal, title="Update LeetCode Session"):
 async def session_command(interaction: discord.Interaction):
     await interaction.response.send_modal(SessionModal())
 
+
+def handle_sigterm(signum, frame):
+    """Graceful shutdown: wait for sync to finish, then close bot."""
+    async def shutdown():
+        if sync_lock.locked():
+            async with sync_lock:
+                pass
+        await bot.close()
+
+    loop = bot.loop
+    if loop and loop.is_running():
+        loop.create_task(shutdown())
+
+
+signal.signal(signal.SIGTERM, handle_sigterm)
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)

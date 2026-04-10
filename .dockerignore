@@ -1,0 +1,17 @@
+.git
+.venv
+__pycache__
+daily/
+*.pyc
+.env
+credential.json
+session.txt
+.seen_urls
+.last_sync.json
+.DS_Store
+.vscode/
+.claude/
+biweekly/
+weekly/
+other/
+templates/
