@@ -127,6 +127,7 @@ def run(
         lang = detail["lang"]["name"]
         q_slug = detail["question"]["titleSlug"]
         q_id = detail["question"]["questionFrontendId"]
+        q_title = detail["question"].get("title", q_slug)
         ext = LANG_EXT.get(lang, lang)
 
         filepath = f"{outdir}/{q_id}.{q_slug}.{ext}"
@@ -137,7 +138,7 @@ def run(
 
         print(f"[OK] {filepath}  ({lang})")
         seen.add(url)
-        downloaded.append(filepath)
+        downloaded.append({"id": q_id, "title": q_title, "slug": q_slug, "path": filepath})
 
     save_seen(seen)
     return downloaded, failed
