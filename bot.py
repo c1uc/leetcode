@@ -34,6 +34,7 @@ DATE_COL = os.environ.get("DAILY_DATE_COLUMN", "A")
 PROBLEM_COL = os.environ.get("DAILY_PROBLEM_COLUMN", "B")
 DIFFICULTY_COL = os.environ.get("DAILY_DIFFICULTY_COLUMN", "C")
 TAGS_COL = os.environ.get("DAILY_TAGS_COLUMN", "D")
+HYPERLINK_CELL = os.environ.get("HYPERLINK_CELL", "H2")
 
 REPO_DIR = Path(__file__).parent
 SESSION_FILE = REPO_DIR / os.environ.get("LEETCODE_SESSION_FILE", "session.txt")
@@ -107,7 +108,6 @@ def git_commit_and_push(message: str) -> str:
 async def run_daily_sync(channel: discord.TextChannel) -> None:
     """Execute the full daily sync workflow."""
     results = {"daily_count": 0, "problems": [], "downloaded": [], "session_ok": True, "git": "", "errors": []}
-    today_str = datetime.datetime.now(CST).strftime("%Y/%m/%d")
 
     # Step 1: Sync daily problems to sheet (no auth needed)
     try:
@@ -120,6 +120,7 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
             problem_col=PROBLEM_COL,
             difficulty_col=DIFFICULTY_COL,
             tags_col=TAGS_COL,
+            link_cell=HYPERLINK_CELL,
         )
         results["daily_count"] = count
         results["problems"] = problems
@@ -149,10 +150,15 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
 
     # Step 3: Git commit and push
     if results["problems"] or results["downloaded"]:
+        now = datetime.datetime.now(CST)
+        today_str = f"{now.year}/{now.month}/{now.day}"
         commit_parts = [today_str]
         if results["problems"]:
             p = results["problems"][-1]
             commit_parts.append(f"{p['id']}. {p['title']}")
+        elif results["downloaded"]:
+            d = results["downloaded"][-1]
+            commit_parts.append(f"{d['id']}. {d['title']}")
         commit_msg = "\t".join(commit_parts)
         try:
             git_result = await asyncio.to_thread(git_commit_and_push, commit_msg)
@@ -187,7 +193,7 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
         embed.add_field(name="Daily Problems", value="Sheet already up to date.", inline=False)
 
     if results["downloaded"]:
-        dl_names = [Path(f).name for f in results["downloaded"]]
+        dl_names = [Path(d["path"]).name for d in results["downloaded"]]
         embed.add_field(name="Submissions Downloaded", value="\n".join(dl_names[:10]), inline=False)
 
     embed.add_field(name="Git", value=results["git"], inline=False)

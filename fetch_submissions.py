@@ -18,6 +18,7 @@ query submissionDetails($submissionId: Int!) {
         }
         question {
             questionFrontendId
+            title
             titleSlug
         }
     }

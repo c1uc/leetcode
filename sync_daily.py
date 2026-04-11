@@ -121,6 +121,23 @@ def parse_sheet_date(s: str) -> datetime.date:
     return datetime.date(int(y), int(m), int(d))
 
 
+def update_link_cell(sheets, sheet_id: str, sheet_name: str, link_cell: str,
+                     gid: int, date_col: str, latest_row: int,
+                     date_str: str, problem_id: str, title: str) -> None:
+    """Update a cell with a hyperlink pointing to the latest daily row."""
+    label = f"{date_str} {problem_id}. {title}"
+    # Escape double quotes in title for the formula
+    label = label.replace('"', '""')
+    url = f"#gid={gid}&range={date_col}{latest_row}"
+    formula = f'=HYPERLINK("{url}","{label}")'
+    sheets.values().update(
+        spreadsheetId=sheet_id,
+        range=f"{sheet_name}!{link_cell}",
+        valueInputOption="USER_ENTERED",
+        body={"values": [[formula]]},
+    ).execute()
+
+
 def run(
     sheet_id: str,
     creds_file: str,
@@ -129,6 +146,7 @@ def run(
     problem_col: str = "B",
     difficulty_col: str = "C",
     tags_col: str = "D",
+    link_cell: str | None = None,
 ) -> tuple[int, list[dict]]:
     """Run the daily sync and return (count_added, problems_added).
 
@@ -155,6 +173,21 @@ def run(
 
     if not missing:
         print("Sheet is already up to date.")
+        # Still update link cell to point to current latest row
+        if link_cell:
+            problem_values = read_column(sheets, sheet_id, sheet_name, problem_col)
+            if last_row <= len(problem_values) and problem_values[last_row - 1]:
+                # Displayed value is "id. title" from the HYPERLINK formula
+                label = problem_values[last_row - 1]
+                label = label.replace('"', '""')
+                url = f"#gid={gid}&range={date_col}{last_row}"
+                formula = f'=HYPERLINK("{url}","{format_date(last_date)} {label}")'
+                sheets.values().update(
+                    spreadsheetId=sheet_id,
+                    range=f"{sheet_name}!{link_cell}",
+                    valueInputOption="USER_ENTERED",
+                    body={"values": [[formula]]},
+                ).execute()
         return 0, []
 
     print(f"Adding {len(missing)} missing entries (up to {format_date(today)})...")
@@ -303,6 +336,15 @@ def run(
             else:
                 raise
 
+    # Update link cell to point to the latest row
+    if link_cell and problems_added:
+        latest = problems_added[-1]
+        latest_row_num = next_row - 1  # last written row (1-based)
+        update_link_cell(
+            sheets, sheet_id, sheet_name, link_cell, gid,
+            date_col, latest_row_num, latest["date"], latest["id"], latest["title"],
+        )
+
     print(f"Done. Added {len(problems_added)} entries.")
     return len(problems_added), problems_added
 
@@ -318,6 +360,7 @@ def main():
             problem_col=os.environ.get("DAILY_PROBLEM_COLUMN", "B"),
             difficulty_col=os.environ.get("DAILY_DIFFICULTY_COLUMN", "C"),
             tags_col=os.environ.get("DAILY_TAGS_COLUMN", "D"),
+            link_cell=os.environ.get("HYPERLINK_CELL"),
         )
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
