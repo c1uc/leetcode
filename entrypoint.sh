@@ -9,7 +9,7 @@ git config --global user.email "${GIT_USER_EMAIL:-bot@noreply}"
 if [ -n "$GIT_TOKEN" ]; then
     git config --global credential.helper store
     REPO_HOST="${GIT_HOST:-github.com}"
-    echo "https://${GIT_TOKEN}@${REPO_HOST}" > ~/.git-credentials
+    echo "https://x-access-token:${GIT_TOKEN}@${REPO_HOST}" > ~/.git-credentials
     chmod 600 ~/.git-credentials
 fi
 
