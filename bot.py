@@ -24,6 +24,7 @@ load_dotenv()
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
+BOT_VERSION = os.environ.get("BOT_VERSION", "dev")
 
 SHEET_ID = os.environ["SHEET_ID"]
 SHEET_API_KEY = os.environ["SHEET_API_KEY"]
@@ -40,8 +41,8 @@ REPO_DIR = Path(__file__).parent
 SESSION_FILE = REPO_DIR / os.environ.get("LEETCODE_SESSION_FILE", "session.txt")
 STATE_FILE = REPO_DIR / ".last_sync.json"
 
-CST = ZoneInfo("America/Chicago")
-SYNC_TIME = datetime.time(hour=8, minute=0, tzinfo=CST)
+LOCAL_TZ = ZoneInfo("Asia/Taipei")  # UTC+8, no DST
+SYNC_TIME = datetime.time(hour=21, minute=0, tzinfo=LOCAL_TZ)
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -150,15 +151,14 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
 
     # Step 3: Git commit and push
     if results["problems"] or results["downloaded"]:
-        now = datetime.datetime.now(CST)
-        today_str = f"{now.year}/{now.month}/{now.day}"
-        commit_parts = [today_str]
         if results["problems"]:
             p = results["problems"][-1]
-            commit_parts.append(f"{p['id']}. {p['title']}")
-        elif results["downloaded"]:
+            commit_parts = [p["date"], f"{p['id']}. {p['title']}"]
+        else:
             d = results["downloaded"][-1]
-            commit_parts.append(f"{d['id']}. {d['title']}")
+            now = datetime.datetime.now(LOCAL_TZ)
+            today_str = f"{now.year}/{now.month}/{now.day}"
+            commit_parts = [today_str, f"{d['id']}. {d['title']}"]
         commit_msg = "\t".join(commit_parts)
         try:
             git_result = await asyncio.to_thread(git_commit_and_push, commit_msg)
@@ -170,7 +170,7 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
 
     # Step 4: Save state
     save_state({
-        "last_sync": datetime.datetime.now(CST).isoformat(),
+        "last_sync": datetime.datetime.now(LOCAL_TZ).isoformat(),
         "daily_count": results["daily_count"],
         "downloaded_count": len(results["downloaded"]),
         "session_ok": results["session_ok"],
@@ -224,10 +224,27 @@ async def daily_sync_task():
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"Bot version: {BOT_VERSION}")
 
     # Sync slash commands
     await bot.tree.sync()
     print("Slash commands synced.")
+
+    # Announce version change (if state has a prior version that differs)
+    state = load_state()
+    prev_version = state.get("version")
+    if prev_version and prev_version != BOT_VERSION:
+        channel = bot.get_channel(CHANNEL_ID)
+        if channel:
+            embed = discord.Embed(
+                title="Bot updated",
+                description=f"`{prev_version}` \u2192 `{BOT_VERSION}`",
+                color=discord.Color.blurple(),
+            )
+            await channel.send(embed=embed)
+    # Persist current version so the next restart has a baseline
+    state["version"] = BOT_VERSION
+    save_state(state)
 
     # Validate session on startup
     try:
@@ -249,7 +266,7 @@ async def on_ready():
     # Start the daily sync task
     if not daily_sync_task.is_running():
         daily_sync_task.start()
-    print(f"Daily sync scheduled for {SYNC_TIME} Central Time.")
+    print(f"Daily sync scheduled for {SYNC_TIME}.")
 
 
 @bot.tree.command(name="sync", description="Manually trigger the daily LeetCode sync")
