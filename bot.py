@@ -73,7 +73,15 @@ def validate_session(session_cookie: str) -> bool:
 
 
 def git_commit_and_push(message: str) -> str:
-    """Stage daily/ changes, commit, and push. Returns status message."""
+    """Sync with remote, stage daily/ changes, commit, and push. Returns status message."""
+    # Sync with remote first so our commit lands on top of origin's latest.
+    result = subprocess.run(
+        ["git", "pull", "--rebase", "--autostash"],
+        cwd=REPO_DIR, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return f"git pull --rebase failed: {result.stderr}"
+
     result = subprocess.run(
         ["git", "add", "daily/"],
         cwd=REPO_DIR, capture_output=True, text=True,
