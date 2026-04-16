@@ -13,12 +13,16 @@ if [ -n "$GIT_TOKEN" ]; then
     chmod 600 ~/.git-credentials
 fi
 
-# Normalize .git ownership so git can write objects during fetch/pull.
-# Safe no-op when permissions are already correct. Errors ignored so the
-# bot starts even if we lack chown privileges (e.g., rootless Docker).
-if [ -d /app/.git ]; then
-    chown -R "$(id -u):$(id -g)" /app/.git 2>/dev/null || true
-    chmod -R u+rwX,g+rwX /app/.git 2>/dev/null || true
+REPO_DIR="${REPO_DIR:-/app/repo}"
+
+# First run: clone. Subsequent runs: fetch & reset to origin.
+if [ ! -d "$REPO_DIR/.git" ]; then
+    echo "[entrypoint] Cloning repository..."
+    git clone --single-branch --branch main "${GIT_REPO_URL}" "$REPO_DIR"
+else
+    echo "[entrypoint] Pulling latest..."
+    git -C "$REPO_DIR" fetch origin
+    git -C "$REPO_DIR" reset --hard origin/main
 fi
 
 exec "$@"

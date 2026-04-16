@@ -37,9 +37,10 @@ DIFFICULTY_COL = os.environ.get("DAILY_DIFFICULTY_COLUMN", "C")
 TAGS_COL = os.environ.get("DAILY_TAGS_COLUMN", "D")
 HYPERLINK_CELL = os.environ.get("HYPERLINK_CELL", "H2")
 
-REPO_DIR = Path(__file__).parent
-SESSION_FILE = REPO_DIR / os.environ.get("LEETCODE_SESSION_FILE", "session.txt")
-STATE_FILE = REPO_DIR / ".last_sync.json"
+APP_DIR = Path(__file__).parent
+REPO_DIR = Path(os.environ.get("REPO_DIR", str(APP_DIR)))
+SESSION_FILE = APP_DIR / os.environ.get("LEETCODE_SESSION_FILE", "session.txt")
+STATE_FILE = APP_DIR / ".last_sync.json"
 
 LOCAL_TZ = ZoneInfo("Asia/Taipei")  # UTC+8, no DST
 SYNC_TIME = datetime.time(hour=21, minute=0, tzinfo=LOCAL_TZ)
@@ -72,46 +73,52 @@ def validate_session(session_cookie: str) -> bool:
         return False
 
 
-def git_commit_and_push(message: str) -> str:
+def git_commit_and_push(message: str, max_retries: int = 3) -> str:
     """Sync with remote, stage daily/ changes, commit, and push. Returns status message."""
-    # Sync with remote first so our commit lands on top of origin's latest.
-    result = subprocess.run(
-        ["git", "pull", "--rebase", "--autostash"],
-        cwd=REPO_DIR, capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        return f"git pull --rebase failed: {result.stderr}"
+    for attempt in range(max_retries):
+        # Sync with remote first so our commit lands on top of origin's latest.
+        result = subprocess.run(
+            ["git", "pull", "--rebase", "--autostash"],
+            cwd=REPO_DIR, capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return f"git pull --rebase failed: {result.stderr}"
 
-    result = subprocess.run(
-        ["git", "add", "daily/"],
-        cwd=REPO_DIR, capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        return f"git add failed: {result.stderr}"
+        result = subprocess.run(
+            ["git", "add", "daily/"],
+            cwd=REPO_DIR, capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return f"git add failed: {result.stderr}"
 
-    # Check if there's anything to commit
-    status = subprocess.run(
-        ["git", "diff", "--cached", "--quiet"],
-        cwd=REPO_DIR, capture_output=True,
-    )
-    if status.returncode == 0:
-        return "Nothing to commit."
+        # Check if there's anything to commit
+        status = subprocess.run(
+            ["git", "diff", "--cached", "--quiet"],
+            cwd=REPO_DIR, capture_output=True,
+        )
+        if status.returncode == 0:
+            return "Nothing to commit."
 
-    result = subprocess.run(
-        ["git", "commit", "-m", message],
-        cwd=REPO_DIR, capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        return f"git commit failed: {result.stderr}"
+        result = subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=REPO_DIR, capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return f"git commit failed: {result.stderr}"
 
-    result = subprocess.run(
-        ["git", "push"],
-        cwd=REPO_DIR, capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        return f"git push failed: {result.stderr}"
+        result = subprocess.run(
+            ["git", "push"],
+            cwd=REPO_DIR, capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            return "Committed and pushed."
 
-    return "Committed and pushed."
+        # Push failed (likely non-fast-forward). Retry with fresh pull.
+        if attempt < max_retries - 1:
+            print(f"[WARN] Push attempt {attempt + 1} failed, retrying...", file=sys.stderr)
+            continue
+
+    return f"git push failed after {max_retries} attempts: {result.stderr}"
 
 
 async def run_daily_sync(channel: discord.TextChannel) -> None:
