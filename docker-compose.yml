@@ -7,13 +7,13 @@ services:
       - GIT_USER_NAME=${GIT_USER_NAME:-leetcode-bot}
       - GIT_USER_EMAIL=${GIT_USER_EMAIL:-bot@noreply}
       - GIT_TOKEN=${GIT_TOKEN}
+      - GIT_REPO_URL=${GIT_REPO_URL}
     volumes:
       - ./credential.json:/app/credential.json:ro
       - ./session.txt:/app/session.txt
-      - ./daily:/app/daily
-      - ./.git:/app/.git
       - ./.seen_urls:/app/.seen_urls
       - ./.last_sync.json:/app/.last_sync.json
+      - repo-data:/app/repo
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
@@ -27,3 +27,6 @@ services:
       - WATCHTOWER_POLL_INTERVAL=300
       - WATCHTOWER_LABEL_ENABLE=true
     command: --label-enable
+
+volumes:
+  repo-data:
