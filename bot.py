@@ -38,7 +38,7 @@ TAGS_COL = os.environ.get("DAILY_TAGS_COLUMN", "D")
 HYPERLINK_CELL = os.environ.get("HYPERLINK_CELL", "H2")
 
 APP_DIR = Path(__file__).parent
-REPO_DIR = Path(os.environ.get("REPO_DIR", str(APP_DIR)))
+REPO_DIR = Path(os.environ.get("REPO_DIR", "/app/repo"))
 SESSION_FILE = APP_DIR / os.environ.get("LEETCODE_SESSION_FILE", "session.txt")
 STATE_FILE = APP_DIR / ".last_sync.json"
 
