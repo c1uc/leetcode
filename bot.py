@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Discord bot that automates LeetCode daily sync at 8:00 AM CST."""
+"""Discord bot that automates LeetCode daily sync."""
 
 import asyncio
+import dataclasses
 import datetime
 import json
 import os
@@ -12,7 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import discord
-from discord import app_commands, ui
+from discord import ui
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
@@ -20,52 +21,100 @@ import sync_daily
 import sync_submissions
 from sync_submissions import SessionExpiredError
 
-load_dotenv()
 
-DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
-CHANNEL_ID = int(os.environ["DISCORD_CHANNEL_ID"])
-BOT_VERSION = os.environ.get("BOT_VERSION", "dev")
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
-SHEET_ID = os.environ["SHEET_ID"]
-SHEET_API_KEY = os.environ["SHEET_API_KEY"]
-GID = int(os.environ.get("GID", "0"))
-SUBMISSION_LINK_COLUMN = os.environ.get("SUBMISSION_LINK_COLUMN", "A")
-CREDS_FILE = os.environ["GOOGLE_SERVICE_ACCOUNT_FILE"]
-DATE_COL = os.environ.get("DAILY_DATE_COLUMN", "A")
-PROBLEM_COL = os.environ.get("DAILY_PROBLEM_COLUMN", "B")
-DIFFICULTY_COL = os.environ.get("DAILY_DIFFICULTY_COLUMN", "C")
-TAGS_COL = os.environ.get("DAILY_TAGS_COLUMN", "D")
-HYPERLINK_CELL = os.environ.get("HYPERLINK_CELL", "H2")
+@dataclasses.dataclass(frozen=True)
+class Config:
+    """All bot configuration, loaded once from environment variables."""
 
-APP_DIR = Path(__file__).parent
-REPO_DIR = Path(os.environ.get("REPO_DIR", "/app/repo"))
-SESSION_FILE = APP_DIR / os.environ.get("LEETCODE_SESSION_FILE", "session.txt")
-STATE_FILE = APP_DIR / ".last_sync.json"
+    # Discord
+    discord_token: str
+    channel_id: int
+    bot_version: str
 
-LOCAL_TZ = ZoneInfo("Asia/Taipei")  # UTC+8, no DST
-SYNC_TIME = datetime.time(hour=21, minute=0, tzinfo=LOCAL_TZ)
+    # Google Sheets
+    sheet_id: str
+    sheet_api_key: str
+    gid: int
+    submission_link_column: str
+    creds_file: str
+    date_col: str
+    problem_col: str
+    difficulty_col: str
+    tags_col: str
+    hyperlink_cell: str
+
+    # Paths
+    app_dir: Path
+    repo_dir: Path
+    session_file: Path
+    state_file: Path
+
+    # Schedule
+    local_tz: ZoneInfo
+    sync_time: datetime.time
+
+    @classmethod
+    def from_env(cls) -> "Config":
+        load_dotenv()
+        app_dir = Path(__file__).parent
+        tz = ZoneInfo(os.environ.get("SYNC_TIMEZONE", "Asia/Taipei"))
+        sync_hour, sync_minute = (
+            os.environ.get("SYNC_TIME", "21:00").split(":")
+        )
+        return cls(
+            discord_token=os.environ["DISCORD_TOKEN"],
+            channel_id=int(os.environ["DISCORD_CHANNEL_ID"]),
+            bot_version=os.environ.get("BOT_VERSION", "dev"),
+            sheet_id=os.environ["SHEET_ID"],
+            sheet_api_key=os.environ["SHEET_API_KEY"],
+            gid=int(os.environ.get("GID", "0")),
+            submission_link_column=os.environ.get("SUBMISSION_LINK_COLUMN", "A"),
+            creds_file=os.environ["GOOGLE_SERVICE_ACCOUNT_FILE"],
+            date_col=os.environ.get("DAILY_DATE_COLUMN", "A"),
+            problem_col=os.environ.get("DAILY_PROBLEM_COLUMN", "B"),
+            difficulty_col=os.environ.get("DAILY_DIFFICULTY_COLUMN", "C"),
+            tags_col=os.environ.get("DAILY_TAGS_COLUMN", "D"),
+            hyperlink_cell=os.environ.get("HYPERLINK_CELL", "H2"),
+            app_dir=app_dir,
+            repo_dir=Path(os.environ.get("REPO_DIR", "/app/repo")),
+            session_file=app_dir / os.environ.get("LEETCODE_SESSION_FILE", "session.txt"),
+            state_file=app_dir / ".last_sync.json",
+            local_tz=tz,
+            sync_time=datetime.time(hour=int(sync_hour), minute=int(sync_minute), tzinfo=tz),
+        )
+
+
+cfg = Config.from_env()
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 sync_lock = asyncio.Lock()
 
 
+# ---------------------------------------------------------------------------
+# State helpers
+# ---------------------------------------------------------------------------
+
 def read_session() -> str:
-    return SESSION_FILE.read_text().strip()
+    return cfg.session_file.read_text().strip()
 
 
 def save_state(state: dict) -> None:
-    STATE_FILE.write_text(json.dumps(state, indent=2) + "\n")
+    cfg.state_file.write_text(json.dumps(state, indent=2) + "\n")
 
 
 def load_state() -> dict:
-    if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text())
+    if cfg.state_file.exists():
+        return json.loads(cfg.state_file.read_text())
     return {}
 
 
 def validate_session(session_cookie: str) -> bool:
-    """Test if a LeetCode session cookie is valid by attempting to create a session."""
+    """Test if a LeetCode session cookie is valid."""
     try:
         sync_submissions.make_leetcode_session(session_cookie)
         return True
@@ -73,47 +122,48 @@ def validate_session(session_cookie: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Git operations
+# ---------------------------------------------------------------------------
+
 def git_commit_and_push(message: str, max_retries: int = 3) -> str:
-    """Sync with remote, stage daily/ changes, commit, and push. Returns status message."""
+    """Sync with remote, stage daily/ changes, commit, and push."""
     for attempt in range(max_retries):
-        # Sync with remote first so our commit lands on top of origin's latest.
         result = subprocess.run(
             ["git", "pull", "--rebase", "--autostash"],
-            cwd=REPO_DIR, capture_output=True, text=True,
+            cwd=cfg.repo_dir, capture_output=True, text=True,
         )
         if result.returncode != 0:
             return f"git pull --rebase failed: {result.stderr}"
 
         result = subprocess.run(
             ["git", "add", "daily/"],
-            cwd=REPO_DIR, capture_output=True, text=True,
+            cwd=cfg.repo_dir, capture_output=True, text=True,
         )
         if result.returncode != 0:
             return f"git add failed: {result.stderr}"
 
-        # Check if there's anything to commit
         status = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
-            cwd=REPO_DIR, capture_output=True,
+            cwd=cfg.repo_dir, capture_output=True,
         )
         if status.returncode == 0:
             return "Nothing to commit."
 
         result = subprocess.run(
             ["git", "commit", "-m", message],
-            cwd=REPO_DIR, capture_output=True, text=True,
+            cwd=cfg.repo_dir, capture_output=True, text=True,
         )
         if result.returncode != 0:
             return f"git commit failed: {result.stderr}"
 
         result = subprocess.run(
             ["git", "push"],
-            cwd=REPO_DIR, capture_output=True, text=True,
+            cwd=cfg.repo_dir, capture_output=True, text=True,
         )
         if result.returncode == 0:
             return "Committed and pushed."
 
-        # Push failed (likely non-fast-forward). Retry with fresh pull.
         if attempt < max_retries - 1:
             print(f"[WARN] Push attempt {attempt + 1} failed, retrying...", file=sys.stderr)
             continue
@@ -121,39 +171,43 @@ def git_commit_and_push(message: str, max_retries: int = 3) -> str:
     return f"git push failed after {max_retries} attempts: {result.stderr}"
 
 
+# ---------------------------------------------------------------------------
+# Sync workflow
+# ---------------------------------------------------------------------------
+
 async def run_daily_sync(channel: discord.TextChannel) -> None:
     """Execute the full daily sync workflow."""
     results = {"daily_count": 0, "problems": [], "downloaded": [], "session_ok": True, "git": "", "errors": []}
 
-    # Step 1: Sync daily problems to sheet (no auth needed)
+    # Step 1: Sync daily problems to sheet
     try:
         count, problems = await asyncio.to_thread(
             sync_daily.run,
-            sheet_id=SHEET_ID,
-            creds_file=CREDS_FILE,
-            gid=GID,
-            date_col=DATE_COL,
-            problem_col=PROBLEM_COL,
-            difficulty_col=DIFFICULTY_COL,
-            tags_col=TAGS_COL,
-            link_cell=HYPERLINK_CELL,
+            sheet_id=cfg.sheet_id,
+            creds_file=cfg.creds_file,
+            gid=cfg.gid,
+            date_col=cfg.date_col,
+            problem_col=cfg.problem_col,
+            difficulty_col=cfg.difficulty_col,
+            tags_col=cfg.tags_col,
+            link_cell=cfg.hyperlink_cell,
         )
         results["daily_count"] = count
         results["problems"] = problems
     except Exception as e:
         results["errors"].append(f"Daily sync failed: {e}")
 
-    # Step 2: Sync submissions (needs auth)
+    # Step 2: Sync submissions
     session_cookie = read_session()
     try:
         downloaded, failed = await asyncio.to_thread(
             sync_submissions.run,
-            sheet_id=SHEET_ID,
-            api_key=SHEET_API_KEY,
+            sheet_id=cfg.sheet_id,
+            api_key=cfg.sheet_api_key,
             session_cookie=session_cookie,
-            outdir=str(REPO_DIR / "daily"),
-            gid=GID,
-            col_letter=SUBMISSION_LINK_COLUMN,
+            outdir=str(cfg.repo_dir / "daily"),
+            gid=cfg.gid,
+            col_letter=cfg.submission_link_column,
         )
         results["downloaded"] = downloaded
         if failed:
@@ -171,7 +225,7 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
             commit_parts = [p["date"], f"{p['id']}. {p['title']}"]
         else:
             d = results["downloaded"][-1]
-            now = datetime.datetime.now(LOCAL_TZ)
+            now = datetime.datetime.now(cfg.local_tz)
             today_str = f"{now.year}/{now.month}/{now.day}"
             commit_parts = [today_str, f"{d['id']}. {d['title']}"]
         commit_msg = "\t".join(commit_parts)
@@ -185,7 +239,7 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
 
     # Step 4: Save state
     save_state({
-        "last_sync": datetime.datetime.now(LOCAL_TZ).isoformat(),
+        "last_sync": datetime.datetime.now(cfg.local_tz).isoformat(),
         "daily_count": results["daily_count"],
         "downloaded_count": len(results["downloaded"]),
         "session_ok": results["session_ok"],
@@ -218,7 +272,6 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
 
     await channel.send(embed=embed)
 
-    # Session expiry notification
     if not results["session_ok"]:
         await channel.send(
             "**\u26a0\ufe0f LeetCode session expired.** "
@@ -226,63 +279,23 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
         )
 
 
-@tasks.loop(time=SYNC_TIME)
+# ---------------------------------------------------------------------------
+# Scheduled task
+# ---------------------------------------------------------------------------
+
+@tasks.loop(time=cfg.sync_time)
 async def daily_sync_task():
-    channel = bot.get_channel(CHANNEL_ID)
+    channel = bot.get_channel(cfg.channel_id)
     if channel is None:
-        print(f"[ERROR] Channel {CHANNEL_ID} not found.", file=sys.stderr)
+        print(f"[ERROR] Channel {cfg.channel_id} not found.", file=sys.stderr)
         return
     async with sync_lock:
         await run_daily_sync(channel)
 
 
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    print(f"Bot version: {BOT_VERSION}")
-
-    # Sync slash commands
-    await bot.tree.sync()
-    print("Slash commands synced.")
-
-    # Announce version change (if state has a prior version that differs)
-    state = load_state()
-    prev_version = state.get("version")
-    if prev_version and prev_version != BOT_VERSION:
-        channel = bot.get_channel(CHANNEL_ID)
-        if channel:
-            embed = discord.Embed(
-                title="Bot updated",
-                description=f"`{prev_version}` \u2192 `{BOT_VERSION}`",
-                color=discord.Color.blurple(),
-            )
-            await channel.send(embed=embed)
-    # Persist current version so the next restart has a baseline
-    state["version"] = BOT_VERSION
-    save_state(state)
-
-    # Validate session on startup
-    try:
-        session_cookie = read_session()
-        valid = await asyncio.to_thread(validate_session, session_cookie)
-        if valid:
-            print("LeetCode session is valid.")
-        else:
-            print("[WARN] LeetCode session appears expired.", file=sys.stderr)
-            channel = bot.get_channel(CHANNEL_ID)
-            if channel:
-                await channel.send(
-                    "**\u26a0\ufe0f Bot started, but LeetCode session is expired.** "
-                    "Please update with `/session` or edit `session.txt`."
-                )
-    except Exception as e:
-        print(f"[WARN] Session validation failed: {e}", file=sys.stderr)
-
-    # Start the daily sync task
-    if not daily_sync_task.is_running():
-        daily_sync_task.start()
-    print(f"Daily sync scheduled for {SYNC_TIME}.")
-
+# ---------------------------------------------------------------------------
+# Discord commands
+# ---------------------------------------------------------------------------
 
 @bot.tree.command(name="sync", description="Manually trigger the daily LeetCode sync")
 async def sync_command(interaction: discord.Interaction):
@@ -291,7 +304,7 @@ async def sync_command(interaction: discord.Interaction):
         return
 
     await interaction.response.send_message("Starting sync...", ephemeral=True)
-    channel = bot.get_channel(CHANNEL_ID)
+    channel = bot.get_channel(cfg.channel_id)
     if channel is None:
         await interaction.followup.send("Notification channel not found.", ephemeral=True)
         return
@@ -322,7 +335,7 @@ async def status_command(interaction: discord.Interaction):
         value="\u2705 Valid" if valid else "\u274c Expired",
         inline=False,
     )
-    embed.add_field(name="Next Sync", value=f"{SYNC_TIME} Central Time", inline=False)
+    embed.add_field(name="Next Sync", value=f"{cfg.sync_time} ({cfg.local_tz})", inline=False)
 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -345,7 +358,7 @@ class SessionModal(ui.Modal, title="Update LeetCode Session"):
 
         valid = await asyncio.to_thread(validate_session, token)
         if valid:
-            SESSION_FILE.write_text(token + "\n")
+            cfg.session_file.write_text(token + "\n")
             await interaction.followup.send("\u2705 Session updated and verified!", ephemeral=True)
         else:
             await interaction.followup.send(
@@ -358,6 +371,55 @@ class SessionModal(ui.Modal, title="Update LeetCode Session"):
 @bot.tree.command(name="session", description="Update the LeetCode session token")
 async def session_command(interaction: discord.Interaction):
     await interaction.response.send_modal(SessionModal())
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle
+# ---------------------------------------------------------------------------
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"Bot version: {cfg.bot_version}")
+
+    await bot.tree.sync()
+    print("Slash commands synced.")
+
+    # Announce version change
+    state = load_state()
+    prev_version = state.get("version")
+    if prev_version and prev_version != cfg.bot_version:
+        channel = bot.get_channel(cfg.channel_id)
+        if channel:
+            embed = discord.Embed(
+                title="Bot updated",
+                description=f"`{prev_version}` \u2192 `{cfg.bot_version}`",
+                color=discord.Color.blurple(),
+            )
+            await channel.send(embed=embed)
+    state["version"] = cfg.bot_version
+    save_state(state)
+
+    # Validate session on startup
+    try:
+        session_cookie = read_session()
+        valid = await asyncio.to_thread(validate_session, session_cookie)
+        if valid:
+            print("LeetCode session is valid.")
+        else:
+            print("[WARN] LeetCode session appears expired.", file=sys.stderr)
+            channel = bot.get_channel(cfg.channel_id)
+            if channel:
+                await channel.send(
+                    "**\u26a0\ufe0f Bot started, but LeetCode session is expired.** "
+                    "Please update with `/session` or edit `session.txt`."
+                )
+    except Exception as e:
+        print(f"[WARN] Session validation failed: {e}", file=sys.stderr)
+
+    if not daily_sync_task.is_running():
+        daily_sync_task.start()
+    print(f"Daily sync scheduled for {cfg.sync_time}.")
 
 
 def handle_sigterm(signum, frame):
@@ -376,4 +438,4 @@ def handle_sigterm(signum, frame):
 signal.signal(signal.SIGTERM, handle_sigterm)
 
 if __name__ == "__main__":
-    bot.run(DISCORD_TOKEN)
+    bot.run(cfg.discord_token)
