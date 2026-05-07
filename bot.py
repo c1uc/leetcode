@@ -126,49 +126,65 @@ def validate_session(session_cookie: str) -> bool:
 # Git operations
 # ---------------------------------------------------------------------------
 
-def git_commit_and_push(message: str, max_retries: int = 3) -> str:
-    """Sync with remote, stage daily/ changes, commit, and push."""
-    for attempt in range(max_retries):
-        result = subprocess.run(
-            ["git", "pull", "--rebase", "--autostash"],
-            cwd=cfg.repo_dir, capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            return f"git pull --rebase failed: {result.stderr}"
+def git_commit_each_and_push(downloaded: list[dict], date_str: str, max_retries: int = 3) -> str:
+    """Pull, commit each downloaded file individually, then push (with retry)."""
+    pull = subprocess.run(
+        ["git", "pull", "--rebase", "--autostash"],
+        cwd=cfg.repo_dir, capture_output=True, text=True,
+    )
+    if pull.returncode != 0:
+        return f"git pull --rebase failed: {pull.stderr}"
 
-        result = subprocess.run(
-            ["git", "add", "daily/"],
+    committed = 0
+    for d in downloaded:
+        path = Path(d["path"])
+        rel = path.relative_to(cfg.repo_dir) if path.is_absolute() else path
+
+        add = subprocess.run(
+            ["git", "add", "--", str(rel)],
             cwd=cfg.repo_dir, capture_output=True, text=True,
         )
-        if result.returncode != 0:
-            return f"git add failed: {result.stderr}"
+        if add.returncode != 0:
+            return f"git add failed for {rel}: {add.stderr}"
 
         status = subprocess.run(
             ["git", "diff", "--cached", "--quiet"],
             cwd=cfg.repo_dir, capture_output=True,
         )
         if status.returncode == 0:
-            return "Nothing to commit."
+            continue  # nothing changed for this file
 
-        result = subprocess.run(
-            ["git", "commit", "-m", message],
+        msg = f"{date_str}\t{d['id']}. {d['title']}"
+        commit = subprocess.run(
+            ["git", "commit", "-m", msg],
             cwd=cfg.repo_dir, capture_output=True, text=True,
         )
-        if result.returncode != 0:
-            return f"git commit failed: {result.stderr}"
+        if commit.returncode != 0:
+            return f"git commit failed for {rel}: {commit.stderr}"
+        committed += 1
 
-        result = subprocess.run(
+    if committed == 0:
+        return "Nothing to commit."
+
+    push_err = ""
+    for attempt in range(max_retries):
+        push = subprocess.run(
             ["git", "push"],
             cwd=cfg.repo_dir, capture_output=True, text=True,
         )
-        if result.returncode == 0:
-            return "Committed and pushed."
-
+        if push.returncode == 0:
+            return f"Committed and pushed {committed} file(s)."
+        push_err = push.stderr
         if attempt < max_retries - 1:
-            print(f"[WARN] Push attempt {attempt + 1} failed, retrying...", file=sys.stderr)
-            continue
+            print(f"[WARN] Push attempt {attempt + 1} failed, rebasing and retrying...", file=sys.stderr)
+            rebase = subprocess.run(
+                ["git", "pull", "--rebase", "--autostash"],
+                cwd=cfg.repo_dir, capture_output=True, text=True,
+            )
+            if rebase.returncode != 0:
+                return f"git pull --rebase failed during retry: {rebase.stderr}"
 
-    return f"git push failed after {max_retries} attempts: {result.stderr}"
+    return f"git push failed after {max_retries} attempts: {push_err}"
 
 
 # ---------------------------------------------------------------------------
@@ -218,19 +234,14 @@ async def run_daily_sync(channel: discord.TextChannel) -> None:
     except Exception as e:
         results["errors"].append(f"Submission sync failed: {e}")
 
-    # Step 3: Git commit and push
-    if results["problems"] or results["downloaded"]:
-        if results["problems"]:
-            p = results["problems"][-1]
-            commit_parts = [p["date"], f"{p['id']}. {p['title']}"]
-        else:
-            d = results["downloaded"][-1]
-            now = datetime.datetime.now(cfg.local_tz)
-            today_str = f"{now.year}/{now.month}/{now.day}"
-            commit_parts = [today_str, f"{d['id']}. {d['title']}"]
-        commit_msg = "\t".join(commit_parts)
+    # Step 3: Commit each downloaded file individually, then push
+    if results["downloaded"]:
+        now = datetime.datetime.now(cfg.local_tz)
+        date_str = f"{now.year}/{now.month}/{now.day}"
         try:
-            git_result = await asyncio.to_thread(git_commit_and_push, commit_msg)
+            git_result = await asyncio.to_thread(
+                git_commit_each_and_push, results["downloaded"], date_str
+            )
             results["git"] = git_result
         except Exception as e:
             results["errors"].append(f"Git failed: {e}")
