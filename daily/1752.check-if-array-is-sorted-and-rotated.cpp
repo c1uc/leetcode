@@ -1,10 +1,3 @@
-/*
- * @lc app=leetcode id=1752 lang=cpp
- *
- * [1752] Check if Array Is Sorted and Rotated
- */
-
-// @lc code=start
 #include <bits/stdc++.h>
 #define _ ios_base::sync_with_stdio(0);cin.tie(0);
 using namespace std;
@@ -28,5 +21,3 @@ public:
         return true;
     }
 };
-// @lc code=end
-
