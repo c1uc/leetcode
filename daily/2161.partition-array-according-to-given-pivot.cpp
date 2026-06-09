@@ -1,10 +1,3 @@
-/*
- * @lc app=leetcode id=2161 lang=cpp
- *
- * [2161] Partition Array According to Given Pivot
- */
-
-// @lc code=start
 #include <bits/stdc++.h>
 using namespace std;
 
@@ -38,5 +31,3 @@ public:
         return nums;
     }
 };
-// @lc code=end
-
