@@ -1,10 +1,3 @@
-/*
- * @lc app=leetcode id=1358 lang=cpp
- *
- * [1358] Number of Substrings Containing All Three Characters
- */
-
-// @lc code=start
 #include <bits/stdc++.h>
 using namespace std;
 
@@ -41,5 +34,3 @@ public:
         return ans;
     }
 };
-// @lc code=end
-
