@@ -1,10 +1,3 @@
-/*
- * @lc app=leetcode id=2685 lang=cpp
- *
- * [2685] Count the Number of Complete Components
- */
-
-// @lc code=start
 #include <bits/stdc++.h>
 using namespace std;
 
@@ -39,12 +32,10 @@ public:
             int x = find(i, find);
             if(vis[x]) continue;
             vis[x] = 1;
-            if(sz[x] * (sz[x] - 1) / 2 == edges_cnt[x]) {
+            if((sz[x] * (sz[x] - 1) >> 1) == edges_cnt[x]) {
                 ++ans;
             }
         }
         return ans;
     }
 };
-// @lc code=end
-
